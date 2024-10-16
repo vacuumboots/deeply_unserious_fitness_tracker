@@ -4,11 +4,20 @@ import sqlite3
 import csv
 from datetime import datetime, timedelta
 import os
+import logging
 
 DATABASE_PATH = '/app/data/data.db'
 
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
 def connect_db():
-    return sqlite3.connect(DATABASE_PATH)
+    try:
+        return sqlite3.connect(DATABASE_PATH)
+    except sqlite3.Error as e:
+        logger.error(f"Error connecting to database: {e}")
+        return None
 
 app = Flask(__name__)
 CORS(app)
@@ -16,9 +25,10 @@ CORS(app)
 # Create table if it doesn't exist
 def create_table():
     with connect_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute('''CREATE TABLE IF NOT EXISTS exercise (id INTEGER PRIMARY KEY, date TEXT, pull_ups INTEGER, push_ups INTEGER)''')
-        conn.commit()
+        if conn is not None:
+            cursor = conn.cursor()
+            cursor.execute('''CREATE TABLE IF NOT EXISTS exercise (id INTEGER PRIMARY KEY, date TEXT, pull_ups INTEGER, push_ups INTEGER)''')
+            conn.commit()
 
 create_table()
 
@@ -41,10 +51,17 @@ def submit():
     pull_ups = data['pull_ups']
     push_ups = data['push_ups']
     
+    logger.debug(f"Received data for submission: date={date}, pull_ups={pull_ups}, push_ups={push_ups}")
+    
     with connect_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute('INSERT INTO exercise (date, pull_ups, push_ups) VALUES (?, ?, ?)', (date, pull_ups, push_ups))
-        conn.commit()
+        if conn is not None:
+            cursor = conn.cursor()
+            cursor.execute('INSERT INTO exercise (date, pull_ups, push_ups) VALUES (?, ?, ?)', (date, pull_ups, push_ups))
+            conn.commit()
+            logger.debug("Data inserted successfully into the database")
+        else:
+            logger.error("Failed to connect to the database")
+            return jsonify({'error': 'Database connection failed'}), 500
     return jsonify({'message': 'Data submitted successfully'}), 200
 
 @app.route('/api/pullups/last7days', methods=['GET'])
@@ -53,55 +70,74 @@ def get_last_7_days_pullups():
     start_date = end_date - timedelta(days=6)
 
     with connect_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT date, SUM(pull_ups) as total_pull_ups
-            FROM exercise
-            WHERE date BETWEEN ? AND ?
-            GROUP BY date
-            ORDER BY date
-        ''', (start_date, end_date))
-        data = cursor.fetchall()
+        if conn is not None:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT date, SUM(pull_ups) as total_pull_ups, SUM(push_ups) as total_push_ups
+                FROM exercise
+                WHERE date BETWEEN ? AND ?
+                GROUP BY date
+                ORDER BY date
+            ''', (start_date, end_date))
+            data = cursor.fetchall()
     
-    response = [{'date': row[0], 'total_pull_ups': row[1]} for row in data]
+    response = [{'date': row[0], 'total_pull_ups': row[1], 'total_push_ups': row[2]} for row in data]
+    logger.debug(f"Last 7 days pull-ups data: {response}")
     return jsonify(response)
 
 @app.route('/api/pullups/monthly', methods=['GET'])
 def get_monthly_pullups_summary():
     with connect_db() as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT strftime('%Y-%m', date) as month, SUM(pull_ups) as total_pull_ups
-            FROM exercise
-            GROUP BY month
-            ORDER BY month
-        ''')
-        data = cursor.fetchall()
+        if conn is not None:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT strftime('%Y-%m', date) as month, SUM(pull_ups) as total_pull_ups, SUM(push_ups) as total_push_ups
+                FROM exercise
+                GROUP BY month
+                ORDER BY month
+            ''')
+            data = cursor.fetchall()
 
-    response = [{'month': row[0], 'total_pull_ups': row[1]} for row in data]
+    response = [{'month': row[0], 'total_pull_ups': row[1], 'total_push_ups': row[2]} for row in data]
+    logger.debug(f"Monthly pull-ups summary: {response}")
     return jsonify(response)
 
 @app.route('/api/export', methods=['GET'])
 def export():
     with connect_db() as conn:
-        cursor = conn.cursor()
-        total_records_query = 'SELECT COUNT(*) FROM exercise'
-        cursor.execute(total_records_query)
-        total_records = cursor.fetchone()[0]
+        if conn is not None:
+            cursor = conn.cursor()
+            total_records_query = 'SELECT COUNT(*) FROM exercise'
+            cursor.execute(total_records_query)
+            total_records = cursor.fetchone()[0]
 
-        page_size = 100
-        data = []
+            page_size = 100
+            data = []
 
-        for offset in range(0, total_records, page_size):
-            cursor.execute('SELECT * FROM exercise LIMIT ? OFFSET ?', (page_size, offset))
-            data.extend(cursor.fetchall())
+            for offset in range(0, total_records, page_size):
+                cursor.execute('SELECT * FROM exercise LIMIT ? OFFSET ?', (page_size, offset))
+                data.extend(cursor.fetchall())
     
     with open('exercise_data.csv', 'w', newline='') as csvfile:
         csv_writer = csv.writer(csvfile)
         csv_writer.writerow(['ID', 'Date', 'Pull-Ups', 'Push-Ups'])
         csv_writer.writerows(data)
     
+    logger.debug("CSV export created successfully")
     return send_file('exercise_data.csv', as_attachment=True)
+
+@app.route('/api/reset', methods=['POST'])
+def reset():
+    with connect_db() as conn:
+        if conn is not None:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM exercise')
+            conn.commit()
+            logger.debug("Database reset successfully")
+        else:
+            logger.error("Failed to connect to the database")
+            return jsonify({'error': 'Database connection failed'}), 500
+    return jsonify({'message': 'Database reset successfully'}), 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)

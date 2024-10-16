@@ -1,0 +1,20 @@
+# Node modules and other dependencies
+node_modules
+*.log
+
+# Git files
+.git
+.gitignore
+
+# Docker files
+Dockerfile
+.dockerignore
+
+# IDE files
+.vscode
+.idea
+
+# Other unnecessary files
+*.md
+.env
+coverage
