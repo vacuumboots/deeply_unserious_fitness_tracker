@@ -1,9 +1,19 @@
-// Main App Component - App.js with Simple Authentication
+// Main App Component - Updated App.js with User Authentication
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
+import jwt_decode from 'jwt-decode';
 import { Line } from 'react-chartjs-2';
-import { Chart, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend } from 'chart.js';
-import { Calendar, Activity, BarChart2, Download, RefreshCcw } from 'lucide-react';
+import {
+  Chart,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+} from 'chart.js';
+import { Calendar, Activity, Download, RefreshCcw } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from './components/ui/card';
 import './App.css';
 import 'bootstrap/dist/css/bootstrap.min.css';
@@ -12,33 +22,72 @@ import 'bootstrap/dist/css/bootstrap.min.css';
 Chart.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
 function App() {
+  // Authentication state
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [token, setToken] = useState(null);
+
+  // User input states
+  const [isRegistering, setIsRegistering] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+
+  // Data states
   const [chartData, setChartData] = useState({});
   const [pushUpsChartData, setPushUpsChartData] = useState({});
   const [monthlySummary, setMonthlySummary] = useState([]);
   const [monthlyPushUpsSummary, setMonthlyPushUpsSummary] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [date, setDate] = useState("");
+
+  // Exercise input states
+  const [date, setDate] = useState('');
   const [pullUps, setPullUps] = useState(0);
   const [pushUps, setPushUps] = useState(0);
 
-  const hardcodedUsername = "admin";
-  const hardcodedPassword = "password123";
+  // Base URL for API endpoints
+  const API_BASE_URL = 'http://localhost:5000';
 
-  const handleLogin = (e) => {
+  // Handle user registration
+  const handleRegister = async (e) => {
     e.preventDefault();
-    if (username === hardcodedUsername && password === hardcodedPassword) {
-      setIsAuthenticated(true);
-    } else {
-      alert("Invalid username or password");
+    try {
+      await axios.post(`${API_BASE_URL}/api/register`, { username, password });
+      alert('Registration successful. You can now log in.');
+      setIsRegistering(false);
+    } catch (error) {
+      console.error('Registration error:', error);
+      alert(error.response?.data?.error || 'Registration failed.');
     }
   };
 
+  // Handle user login
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    try {
+      const response = await axios.post(`${API_BASE_URL}/api/login`, { username, password });
+      const receivedToken = response.data.token;
+      setToken(receivedToken);
+      setIsAuthenticated(true);
+      // Optionally store the token in localStorage
+      // localStorage.setItem('token', receivedToken);
+    } catch (error) {
+      console.error('Login error:', error);
+      alert(error.response?.data?.error || 'Login failed.');
+    }
+  };
+
+  // Handle user logout
+  const handleLogout = () => {
+    setToken(null);
+    setIsAuthenticated(false);
+    // localStorage.removeItem('token');
+    setUsername('');
+    setPassword('');
+  };
+
+  // Fetch all data when authenticated
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && token) {
       const fetchData = async () => {
         setLoading(true);
         setError(null);
@@ -53,18 +102,21 @@ function App() {
       };
       fetchData();
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, token]);
 
+  // Fetch chart data for pull-ups
   const fetchChartData = async () => {
     try {
-      const response = await axios.get('http://localhost:5000/api/pullups/last7days');
+      const response = await axios.get(`${API_BASE_URL}/api/pullups/last7days`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       const data = response.data;
       if (!data || data.length === 0) {
         setChartData({});
         return;
       }
-      const labels = data.map(entry => entry.date);
-      const pullUpsData = data.map(entry => entry.total_pull_ups);
+      const labels = data.map((entry) => entry.date);
+      const pullUpsData = data.map((entry) => entry.total_pull_ups);
 
       setChartData({
         labels,
@@ -84,16 +136,19 @@ function App() {
     }
   };
 
+  // Fetch chart data for push-ups
   const fetchPushUpsChartData = async () => {
     try {
-      const response = await axios.get('http://localhost:5000/api/pullups/last7days');
+      const response = await axios.get(`${API_BASE_URL}/api/pullups/last7days`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       const data = response.data;
       if (!data || data.length === 0) {
         setPushUpsChartData({});
         return;
       }
-      const labels = data.map(entry => entry.date);
-      const pushUpsData = data.map(entry => entry.total_push_ups);
+      const labels = data.map((entry) => entry.date);
+      const pushUpsData = data.map((entry) => entry.total_push_ups);
 
       setPushUpsChartData({
         labels,
@@ -108,14 +163,17 @@ function App() {
         ],
       });
     } catch (error) {
-      console.error('Error fetching chart data:', error);
+      console.error('Error fetching push-ups chart data:', error);
       throw error;
     }
   };
 
+  // Fetch monthly summaries
   const fetchMonthlySummary = async () => {
     try {
-      const response = await axios.get('http://localhost:5000/api/pullups/monthly');
+      const response = await axios.get(`${API_BASE_URL}/api/pullups/monthly`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       setMonthlySummary(response.data);
     } catch (error) {
       console.error('Error fetching monthly summary:', error);
@@ -125,14 +183,17 @@ function App() {
 
   const fetchMonthlyPushUpsSummary = async () => {
     try {
-      const response = await axios.get('http://localhost:5000/api/pullups/monthly');
+      const response = await axios.get(`${API_BASE_URL}/api/pullups/monthly`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       setMonthlyPushUpsSummary(response.data);
     } catch (error) {
-      console.error('Error fetching monthly summary:', error);
+      console.error('Error fetching monthly push-ups summary:', error);
       throw error;
     }
   };
 
+  // Fetch all necessary data
   const fetchAllData = async () => {
     await fetchChartData();
     await fetchPushUpsChartData();
@@ -140,6 +201,7 @@ function App() {
     await fetchMonthlyPushUpsSummary();
   };
 
+  // Handle exercise data submission
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!date) {
@@ -154,33 +216,55 @@ function App() {
       const pullUpsInt = parseInt(pullUps, 10);
       const pushUpsInt = parseInt(pushUps, 10);
 
-      await axios.post('http://localhost:5000/api/submit', { date, pull_ups: pullUpsInt, push_ups: pushUpsInt });
+      await axios.post(
+        `${API_BASE_URL}/api/submit`,
+        { date, pull_ups: pullUpsInt, push_ups: pushUpsInt },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
       alert('Data submitted successfully');
       fetchAllData();
     } catch (error) {
       console.error('There was an error submitting the data!', error);
+      alert(error.response?.data?.error || 'Error submitting data.');
     }
   };
 
+  // Handle data reset
   const handleReset = async () => {
-    if (window.confirm('Are you sure you want to reset all data? This action cannot be undone.')) {
+    if (window.confirm('Are you sure you want to reset all your data? This action cannot be undone.')) {
       try {
-        await axios.post('http://localhost:5000/api/reset');
-        alert('Database reset successfully');
+        await axios.post(
+          `${API_BASE_URL}/api/reset`,
+          {},
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        alert('Your data has been reset successfully');
         fetchAllData();
       } catch (error) {
         console.error('There was an error resetting the data!', error);
-        alert('Error resetting data');
+        alert(error.response?.data?.error || 'Error resetting data');
       }
     }
   };
 
+  // Handle token expiration
+  useEffect(() => {
+    if (token) {
+      const decoded = jwt_decode(token);
+      if (decoded.exp * 1000 < Date.now()) {
+        handleLogout();
+        alert('Session has expired. Please log in again.');
+      }
+    }
+  }, [token]);
+
+  // Authentication forms
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="w-full max-w-md p-8 space-y-6 bg-white rounded-lg shadow-md">
-          <h2 className="text-2xl font-bold text-center">Login</h2>
-          <form onSubmit={handleLogin} className="space-y-4">
+          <h2 className="text-2xl font-bold text-center">{isRegistering ? 'Register' : 'Login'}</h2>
+          <form onSubmit={isRegistering ? handleRegister : handleLogin} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
               <input
@@ -188,6 +272,7 @@ function App() {
                 className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
+                required
               />
             </div>
             <div>
@@ -197,21 +282,39 @@ function App() {
                 className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                required
               />
             </div>
             <button
               type="submit"
               className="w-full bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded-lg transition-colors"
             >
-              Login
+              {isRegistering ? 'Register' : 'Login'}
             </button>
           </form>
+          <div className="text-center">
+            {isRegistering ? (
+              <p>
+                Already have an account?{' '}
+                <button onClick={() => setIsRegistering(false)} className="text-blue-500">
+                  Login here
+                </button>
+              </p>
+            ) : (
+              <p>
+                Don't have an account?{' '}
+                <button onClick={() => setIsRegistering(true)} className="text-blue-500">
+                  Register here
+                </button>
+              </p>
+            )}
+          </div>
         </div>
       </div>
     );
   }
 
-
+  // Main application UI
   return (
     <div className="min-h-screen bg-gray-50 p-8">
       <div className="max-w-7xl mx-auto space-y-8">
@@ -222,11 +325,19 @@ function App() {
             <p className="text-gray-500 mt-1">Track your daily exercises</p>
           </div>
           <div className="flex gap-4">
-            <button 
-              onClick={() => window.location.href = 'http://localhost:5000/api/export'} 
+            <button
+              onClick={() => {
+                window.location.href = `${API_BASE_URL}/api/export`;
+              }}
               className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700 transition-colors"
             >
               <Download size={20} /> Export CSV
+            </button>
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-2 px-4 py-2 bg-red-100 hover:bg-red-200 rounded-lg text-red-700 transition-colors"
+            >
+              Logout
             </button>
           </div>
         </div>
@@ -244,9 +355,7 @@ function App() {
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Date
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
                   <div className="relative">
                     <Calendar className="absolute left-3 top-3 text-gray-400" size={20} />
                     <input
@@ -254,31 +363,32 @@ function App() {
                       className="pl-10 w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       value={date}
                       onChange={(e) => setDate(e.target.value)}
+                      required
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Pull-Ups
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Pull-Ups</label>
                     <input
                       type="number"
                       className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       value={pullUps}
                       onChange={(e) => setPullUps(e.target.value)}
+                      min="0"
+                      required
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Push-Ups
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Push-Ups</label>
                     <input
                       type="number"
                       className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       value={pushUps}
                       onChange={(e) => setPushUps(e.target.value)}
+                      min="0"
+                      required
                     />
                   </div>
                 </div>
@@ -304,7 +414,9 @@ function App() {
                   <Line data={chartData} />
                 </div>
               ) : (
-                <p className="text-center text-gray-500">No data available for the last 7 days.</p>
+                <p className="text-center text-gray-500">
+                  {loading ? 'Loading data...' : 'No data available for the last 7 days.'}
+                </p>
               )}
             </CardContent>
           </Card>
@@ -319,7 +431,9 @@ function App() {
                   <Line data={pushUpsChartData} />
                 </div>
               ) : (
-                <p className="text-center text-gray-500">No data available for the last 7 days.</p>
+                <p className="text-center text-gray-500">
+                  {loading ? 'Loading data...' : 'No data available for the last 7 days.'}
+                </p>
               )}
             </CardContent>
           </Card>
@@ -332,7 +446,10 @@ function App() {
             <CardContent>
               <div className="space-y-2">
                 {monthlySummary.map((entry, index) => (
-                  <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div
+                    key={index}
+                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                  >
                     <span className="font-medium">{entry.month}</span>
                     <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">
                       {entry.total_pull_ups} Pull-Ups
@@ -350,7 +467,10 @@ function App() {
             <CardContent>
               <div className="space-y-2">
                 {monthlyPushUpsSummary.map((entry, index) => (
-                  <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div
+                    key={index}
+                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                  >
                     <span className="font-medium">{entry.month}</span>
                     <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">
                       {entry.total_push_ups} Push-Ups
@@ -364,7 +484,7 @@ function App() {
 
         {/* Reset Data Button */}
         <div className="flex justify-center">
-          <button 
+          <button
             onClick={handleReset}
             className="flex items-center gap-2 px-4 py-2 text-red-600 hover:text-red-700 transition-colors"
           >

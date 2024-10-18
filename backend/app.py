@@ -5,6 +5,12 @@ import csv
 from datetime import datetime, timedelta
 import os
 import logging
+from werkzeug.security import generate_password_hash, check_password_hash
+import jwt
+from functools import wraps
+
+# Secret key for JWT encoding and decoding (use a secure key in production)
+SECRET_KEY = 'your_secret_key_here'  # Replace with a secure key
 
 DATABASE_PATH = '/app/data/data.db'
 
@@ -22,21 +28,126 @@ def connect_db():
 app = Flask(__name__)
 CORS(app)
 
-# Create table if it doesn't exist
+# Create tables if they don't exist
 def create_table():
     with connect_db() as conn:
         if conn is not None:
             cursor = conn.cursor()
-            cursor.execute('''CREATE TABLE IF NOT EXISTS exercise (id INTEGER PRIMARY KEY, date TEXT, pull_ups INTEGER, push_ups INTEGER)''')
+            # Create users table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL
+                )
+            ''')
+            # Create exercise table with user_id foreign key
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS exercise (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    date TEXT NOT NULL,
+                    pull_ups INTEGER NOT NULL,
+                    push_ups INTEGER NOT NULL,
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                )
+            ''')
             conn.commit()
 
 create_table()
 
+# Authentication decorator
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = None
+        # JWT is passed in the request header
+        if 'Authorization' in request.headers:
+            auth_header = request.headers['Authorization']
+            if auth_header.startswith('Bearer '):
+                token = auth_header.split(" ")[1]
+
+        if not token:
+            return jsonify({'error': 'Token is missing.'}), 401
+
+        try:
+            data = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+            user_id = data['user_id']
+            # Attach user_id to the request context
+            request.user_id = user_id
+        except jwt.ExpiredSignatureError:
+            return jsonify({'error': 'Token has expired.'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'error': 'Invalid token.'}), 401
+
+        return f(*args, **kwargs)
+    return decorated
+
+# User registration endpoint
+@app.route('/api/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+
+    # Validate inputs
+    if not username or not password:
+        return jsonify({'error': 'Username and password are required.'}), 400
+
+    with connect_db() as conn:
+        if conn is not None:
+            cursor = conn.cursor()
+            # Check if the username already exists
+            cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
+            existing_user = cursor.fetchone()
+            if existing_user:
+                return jsonify({'error': 'Username already exists.'}), 400
+
+            # Hash the password and store the user
+            password_hash = generate_password_hash(password)
+            cursor.execute('INSERT INTO users (username, password_hash) VALUES (?, ?)', (username, password_hash))
+            conn.commit()
+        else:
+            return jsonify({'error': 'Database connection failed'}), 500
+
+    return jsonify({'message': 'User registered successfully.'}), 201
+
+# User login endpoint
+@app.route('/api/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+
+    # Validate inputs
+    if not username or not password:
+        return jsonify({'error': 'Username and password are required.'}), 400
+
+    with connect_db() as conn:
+        if conn is not None:
+            cursor = conn.cursor()
+            cursor.execute('SELECT id, password_hash FROM users WHERE username = ?', (username,))
+            user = cursor.fetchone()
+            if user and check_password_hash(user[1], password):
+                # Generate JWT token
+                token = jwt.encode({
+                    'user_id': user[0],
+                    'exp': datetime.utcnow() + timedelta(hours=24)
+                }, SECRET_KEY, algorithm='HS256')
+                return jsonify({'token': token}), 200
+            else:
+                return jsonify({'error': 'Invalid username or password.'}), 401
+        else:
+            return jsonify({'error': 'Database connection failed'}), 500
+
+# Submit exercise data endpoint
 @app.route('/api/submit', methods=['POST'])
+@token_required
 def submit():
     data = request.get_json()
+    user_id = request.user_id  # Get the authenticated user's ID
 
-    # Validate date, pull_ups, and push_ups
+    # Validate pull_ups and push_ups
     if 'pull_ups' not in data or not isinstance(data['pull_ups'], int) or data['pull_ups'] < 0:
         return jsonify({'error': 'Invalid pull_ups value'}), 400
     if 'push_ups' not in data or not isinstance(data['push_ups'], int) or data['push_ups'] < 0:
@@ -51,12 +162,15 @@ def submit():
     pull_ups = data['pull_ups']
     push_ups = data['push_ups']
     
-    logger.debug(f"Received data for submission: date={date}, pull_ups={pull_ups}, push_ups={push_ups}")
-    
+    logger.debug(f"Received data for submission: user_id={user_id}, date={date}, pull_ups={pull_ups}, push_ups={push_ups}")
+
     with connect_db() as conn:
         if conn is not None:
             cursor = conn.cursor()
-            cursor.execute('INSERT INTO exercise (date, pull_ups, push_ups) VALUES (?, ?, ?)', (date, pull_ups, push_ups))
+            cursor.execute('''
+                INSERT INTO exercise (user_id, date, pull_ups, push_ups)
+                VALUES (?, ?, ?, ?)
+            ''', (user_id, date, pull_ups, push_ups))
             conn.commit()
             logger.debug("Data inserted successfully into the database")
         else:
@@ -64,8 +178,11 @@ def submit():
             return jsonify({'error': 'Database connection failed'}), 500
     return jsonify({'message': 'Data submitted successfully'}), 200
 
+# Get last 7 days of exercise data
 @app.route('/api/pullups/last7days', methods=['GET'])
+@token_required
 def get_last_7_days_pullups():
+    user_id = request.user_id
     end_date = datetime.now().date()
     start_date = end_date - timedelta(days=6)
 
@@ -75,69 +192,89 @@ def get_last_7_days_pullups():
             cursor.execute('''
                 SELECT date, SUM(pull_ups) as total_pull_ups, SUM(push_ups) as total_push_ups
                 FROM exercise
-                WHERE date BETWEEN ? AND ?
+                WHERE user_id = ? AND date BETWEEN ? AND ?
                 GROUP BY date
                 ORDER BY date
-            ''', (start_date, end_date))
+            ''', (user_id, start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")))
             data = cursor.fetchall()
-    
+        else:
+            return jsonify({'error': 'Database connection failed'}), 500
+
     response = [{'date': row[0], 'total_pull_ups': row[1], 'total_push_ups': row[2]} for row in data]
-    logger.debug(f"Last 7 days pull-ups data: {response}")
+    logger.debug(f"Last 7 days pull-ups data for user_id={user_id}: {response}")
     return jsonify(response)
 
+# Get monthly exercise summary
 @app.route('/api/pullups/monthly', methods=['GET'])
+@token_required
 def get_monthly_pullups_summary():
+    user_id = request.user_id
+
     with connect_db() as conn:
         if conn is not None:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT strftime('%Y-%m', date) as month, SUM(pull_ups) as total_pull_ups, SUM(push_ups) as total_push_ups
                 FROM exercise
+                WHERE user_id = ?
                 GROUP BY month
                 ORDER BY month
-            ''')
+            ''', (user_id,))
             data = cursor.fetchall()
+        else:
+            return jsonify({'error': 'Database connection failed'}), 500
 
     response = [{'month': row[0], 'total_pull_ups': row[1], 'total_push_ups': row[2]} for row in data]
-    logger.debug(f"Monthly pull-ups summary: {response}")
+    logger.debug(f"Monthly pull-ups summary for user_id={user_id}: {response}")
     return jsonify(response)
 
+# Export exercise data to CSV
 @app.route('/api/export', methods=['GET'])
+@token_required
 def export():
+    user_id = request.user_id
+
     with connect_db() as conn:
         if conn is not None:
             cursor = conn.cursor()
-            total_records_query = 'SELECT COUNT(*) FROM exercise'
-            cursor.execute(total_records_query)
+            cursor.execute('SELECT COUNT(*) FROM exercise WHERE user_id = ?', (user_id,))
             total_records = cursor.fetchone()[0]
 
             page_size = 100
             data = []
 
             for offset in range(0, total_records, page_size):
-                cursor.execute('SELECT * FROM exercise LIMIT ? OFFSET ?', (page_size, offset))
+                cursor.execute('SELECT * FROM exercise WHERE user_id = ? LIMIT ? OFFSET ?', (user_id, page_size, offset))
                 data.extend(cursor.fetchall())
-    
-    with open('exercise_data.csv', 'w', newline='') as csvfile:
+        else:
+            return jsonify({'error': 'Database connection failed'}), 500
+
+    # Prepare CSV file
+    filename = f'exercise_data_user_{user_id}.csv'
+    with open(filename, 'w', newline='') as csvfile:
         csv_writer = csv.writer(csvfile)
-        csv_writer.writerow(['ID', 'Date', 'Pull-Ups', 'Push-Ups'])
+        csv_writer.writerow(['ID', 'User ID', 'Date', 'Pull-Ups', 'Push-Ups'])
         csv_writer.writerows(data)
     
-    logger.debug("CSV export created successfully")
-    return send_file('exercise_data.csv', as_attachment=True)
+    logger.debug(f"CSV export created successfully for user_id={user_id}")
+    return send_file(filename, as_attachment=True)
 
+# Reset user's exercise data
 @app.route('/api/reset', methods=['POST'])
+@token_required
 def reset():
+    user_id = request.user_id
+
     with connect_db() as conn:
         if conn is not None:
             cursor = conn.cursor()
-            cursor.execute('DELETE FROM exercise')
+            cursor.execute('DELETE FROM exercise WHERE user_id = ?', (user_id,))
             conn.commit()
-            logger.debug("Database reset successfully")
+            logger.debug(f"User data reset successfully for user_id={user_id}")
         else:
             logger.error("Failed to connect to the database")
             return jsonify({'error': 'Database connection failed'}), 500
-    return jsonify({'message': 'Database reset successfully'}), 200
+    return jsonify({'message': 'Your data has been reset successfully.'}), 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
