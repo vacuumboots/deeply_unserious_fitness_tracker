@@ -12,14 +12,15 @@ import {
   Title,
   Tooltip,
   Legend,
+  Filler,
 } from 'chart.js';
-import { Calendar, Activity, Download, RefreshCcw } from 'lucide-react';
+import { Calendar, Activity, Download, RefreshCcw, Flame, Info } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from './components/ui/card';
 import './App.css';
 import 'bootstrap/dist/css/bootstrap.min.css';
 
 // Register Chart.js components
-Chart.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
+Chart.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
 
 function App() {
   // Authentication state
@@ -43,6 +44,9 @@ function App() {
   const [date, setDate] = useState('');
   const [pullUps, setPullUps] = useState(0);
   const [pushUps, setPushUps] = useState(0);
+
+  const [currentStreak, setCurrentStreak] = useState(0);
+  const [longestStreak, setLongestStreak] = useState(0);
 
   // Base URL for API endpoints
   const API_BASE_URL = 'http://localhost:5000';
@@ -193,12 +197,26 @@ function App() {
     }
   };
 
+  // Add this new function
+const fetchStreakData = async () => {
+  try {
+    const response = await axios.get(`${API_BASE_URL}/api/streak`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    setCurrentStreak(response.data.current_streak);
+    setLongestStreak(response.data.longest_streak);
+  } catch (error) {
+    console.error('Error fetching streak data:', error);
+  }
+};
+
   // Fetch all necessary data
   const fetchAllData = async () => {
     await fetchChartData();
     await fetchPushUpsChartData();
     await fetchMonthlySummary();
     await fetchMonthlyPushUpsSummary();
+    await fetchStreakData();
   };
 
   // Handle exercise data submission
@@ -215,12 +233,19 @@ function App() {
     try {
       const pullUpsInt = parseInt(pullUps, 10);
       const pushUpsInt = parseInt(pushUps, 10);
-
-      await axios.post(
+      
+      // Capture the response here
+      const response = await axios.post(
         `${API_BASE_URL}/api/submit`,
         { date, pull_ups: pullUpsInt, push_ups: pushUpsInt },
         { headers: { Authorization: `Bearer ${token}` } }
       );
+  
+      if (response.data.current_streak !== undefined) {
+        setCurrentStreak(response.data.current_streak);
+        setLongestStreak(response.data.longest_streak);
+      }
+      
       alert('Data submitted successfully');
       fetchAllData();
     } catch (error) {
@@ -403,7 +428,66 @@ function App() {
             </CardContent>
           </Card>
 
-          {/* Charts */}
+          {/* Workout Streaks Card */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Flame className="text-orange-500" /> {/* Import Flame from lucide-react */}
+                Workout Streaks
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-4 bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg">
+                  <div className="text-2xl font-bold text-orange-600">
+                    {currentStreak}
+                  </div>
+                  <div className="text-sm text-orange-600/80">
+                    Current Streak
+                  </div>
+                </div>
+                <div className="p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg">
+                  <div className="text-2xl font-bold text-purple-600">
+                    {longestStreak}
+                  </div>
+                  <div className="text-sm text-purple-600/80">
+                    Longest Streak
+                  </div>
+                </div>
+              </div>
+              
+              <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center gap-2">
+                  {currentStreak > 0 ? (
+                    <>
+                      <Flame className="text-orange-500" size={20} />
+                      <span className="text-gray-600">
+                        {currentStreak === 1 
+                          ? "1 day streak! Keep it up!" 
+                          : `${currentStreak} days streak! You're on fire!`}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Info className="text-gray-500" size={20} />
+                      <span className="text-gray-600">
+                        Start your streak by logging your workout today!
+                      </span>
+                    </>
+                  )}
+                </div>
+                {longestStreak > currentStreak && (
+                  <div className="mt-2 text-sm text-gray-500">
+                    Personal best: {longestStreak} days
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Charts */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           <Card>
             <CardHeader>
               <CardTitle>Pull-Ups Summary</CardTitle>
@@ -437,8 +521,10 @@ function App() {
               )}
             </CardContent>
           </Card>
+        </div>
 
-          {/* Monthly Summaries */}
+        {/* Monthly Summaries */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           <Card>
             <CardHeader>
               <CardTitle>Monthly Pull-Ups</CardTitle>

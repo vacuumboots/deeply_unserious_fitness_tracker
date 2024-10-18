@@ -172,7 +172,16 @@ def submit():
                 VALUES (?, ?, ?, ?)
             ''', (user_id, date, pull_ups, push_ups))
             conn.commit()
-            logger.debug("Data inserted successfully into the database")
+            
+            # Get updated streak info
+            streak_response = get_streak()
+            streak_data = streak_response.get_json()
+            
+            return jsonify({
+                'message': 'Data submitted successfully',
+                'current_streak': streak_data['current_streak'],
+                'longest_streak': streak_data['longest_streak']
+            }), 200
         else:
             logger.error("Failed to connect to the database")
             return jsonify({'error': 'Database connection failed'}), 500
@@ -275,6 +284,66 @@ def reset():
             logger.error("Failed to connect to the database")
             return jsonify({'error': 'Database connection failed'}), 500
     return jsonify({'message': 'Your data has been reset successfully.'}), 200
+
+@app.route('/api/streak', methods=['GET'])
+@token_required
+def get_streak():
+    user_id = request.user_id
+    today = datetime.now().date()
+    
+    with connect_db() as conn:
+        if conn is not None:
+            cursor = conn.cursor()
+            # Get all workout dates for the user, ordered by date
+            cursor.execute('''
+                SELECT DISTINCT date 
+                FROM exercise 
+                WHERE user_id = ? 
+                ORDER BY date DESC
+            ''', (user_id,))
+            workout_dates = [datetime.strptime(row[0], "%Y-%m-%d").date() 
+                           for row in cursor.fetchall()]
+        else:
+            return jsonify({'error': 'Database connection failed'}), 500
+
+    if not workout_dates:
+        return jsonify({'current_streak': 0, 
+                       'longest_streak': 0})
+
+    # Calculate current streak
+    current_streak = 0
+    latest_workout = workout_dates[0]
+    
+    # If the latest workout isn't today or yesterday, streak is 0
+    if (today - latest_workout).days > 1:
+        current_streak = 0
+    else:
+        current_streak = 1
+        for i in range(len(workout_dates) - 1):
+            date1 = workout_dates[i]
+            date2 = workout_dates[i + 1]
+            if (date1 - date2).days == 1:
+                current_streak += 1
+            else:
+                break
+
+    # Calculate longest streak
+    longest_streak = 1
+    current_count = 1
+    
+    for i in range(len(workout_dates) - 1):
+        date1 = workout_dates[i]
+        date2 = workout_dates[i + 1]
+        if (date1 - date2).days == 1:
+            current_count += 1
+            longest_streak = max(longest_streak, current_count)
+        else:
+            current_count = 1
+
+    return jsonify({
+        'current_streak': current_streak,
+        'longest_streak': longest_streak
+    })
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
