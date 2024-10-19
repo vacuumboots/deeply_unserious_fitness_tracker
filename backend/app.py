@@ -10,7 +10,8 @@ import jwt
 from functools import wraps
 
 # Secret key for JWT encoding and decoding (use a secure key in production)
-SECRET_KEY = 'your_secret_key_here'  # Replace with a secure key
+
+SECRET_KEY = os.environ.get('SECRET_KEY', 'your_default_secret_key') # Replace with a secure key
 
 DATABASE_PATH = '/app/data/data.db'
 
@@ -111,6 +112,14 @@ def register():
             return jsonify({'error': 'Database connection failed'}), 500
 
     return jsonify({'message': 'User registered successfully.'}), 201
+
+@app.route('/api/users', methods=['GET'])
+def get_users():
+    with connect_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, username FROM users')
+        users = cursor.fetchall()
+    return jsonify([{'id': user[0], 'username': user[1]} for user in users]), 200
 
 # User login endpoint
 @app.route('/api/login', methods=['POST'])

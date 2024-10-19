@@ -49,13 +49,13 @@ function App() {
   const [longestStreak, setLongestStreak] = useState(0);
 
   // Base URL for API endpoints
-  const API_BASE_URL = 'http://localhost:5000';
+  const API_BASE_URL = '/api';
 
   // Handle user registration
   const handleRegister = async (e) => {
     e.preventDefault();
     try {
-      await axios.post(`${API_BASE_URL}/api/register`, { username, password });
+      await axios.post(`${API_BASE_URL}/register`, { username, password });
       alert('Registration successful. You can now log in.');
       setIsRegistering(false);
     } catch (error) {
@@ -68,7 +68,7 @@ function App() {
   const handleLogin = async (e) => {
     e.preventDefault();
     try {
-      const response = await axios.post(`${API_BASE_URL}/api/login`, { username, password });
+      const response = await axios.post(`${API_BASE_URL}/login`, { username, password });
       const receivedToken = response.data.token;
       setToken(receivedToken);
       setIsAuthenticated(true);
@@ -111,7 +111,7 @@ function App() {
   // Fetch chart data for pull-ups
   const fetchChartData = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/api/pullups/last7days`, {
+      const response = await axios.get(`${API_BASE_URL}/pullups/last7days`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = response.data;
@@ -143,7 +143,7 @@ function App() {
   // Fetch chart data for push-ups
   const fetchPushUpsChartData = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/api/pullups/last7days`, {
+      const response = await axios.get(`${API_BASE_URL}/pullups/last7days`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = response.data;
@@ -175,7 +175,7 @@ function App() {
   // Fetch monthly summaries
   const fetchMonthlySummary = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/api/pullups/monthly`, {
+      const response = await axios.get(`${API_BASE_URL}/pullups/monthly`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setMonthlySummary(response.data);
@@ -187,7 +187,7 @@ function App() {
 
   const fetchMonthlyPushUpsSummary = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/api/pullups/monthly`, {
+      const response = await axios.get(`${API_BASE_URL}/pullups/monthly`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setMonthlyPushUpsSummary(response.data);
@@ -200,7 +200,7 @@ function App() {
   // Add this new function
 const fetchStreakData = async () => {
   try {
-    const response = await axios.get(`${API_BASE_URL}/api/streak`, {
+    const response = await axios.get(`${API_BASE_URL}/streak`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     setCurrentStreak(response.data.current_streak);
@@ -236,7 +236,7 @@ const fetchStreakData = async () => {
       
       // Capture the response here
       const response = await axios.post(
-        `${API_BASE_URL}/api/submit`,
+        `${API_BASE_URL}/submit`,
         { date, pull_ups: pullUpsInt, push_ups: pushUpsInt },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -259,7 +259,7 @@ const fetchStreakData = async () => {
     if (window.confirm('Are you sure you want to reset all your data? This action cannot be undone.')) {
       try {
         await axios.post(
-          `${API_BASE_URL}/api/reset`,
+          `${API_BASE_URL}/reset`,
           {},
           { headers: { Authorization: `Bearer ${token}` } }
         );
@@ -352,7 +352,7 @@ const fetchStreakData = async () => {
           <div className="flex gap-4">
             <button
               onClick={() => {
-                window.location.href = `${API_BASE_URL}/api/export`;
+                window.location.href = `${API_BASE_URL}/export`;
               }}
               className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700 transition-colors"
             >

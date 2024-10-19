@@ -1,26 +1,25 @@
-# Use the official Node.js image as a base
-FROM node:16
+# Use a lightweight web server to serve the production build
+FROM node:16-alpine AS build
 
-# Set the working directory inside the container
 WORKDIR /app
 
-# Copy the package.json and package-lock.json first to utilize Docker cache efficiently
-COPY package*.json ./
+COPY package.json ./
+RUN npm install --production
 
-# Install dependencies
-RUN npm install
-
-# Install required packages for Tailwind CSS, React components, etc.
 RUN npm install lucide-react @radix-ui/react-alert-dialog tailwindcss postcss autoprefixer react-chartjs-2 chart.js
 
-# Copy the rest of the application code
 COPY . .
 
-# Initialize Tailwind CSS
-RUN npx tailwindcss init -p
+RUN npm run build
 
-# Expose the port that your app will run on
-EXPOSE 3000
+# Serve the build using a static file server
+FROM nginx:alpine
 
-# Start the application
-CMD ["npm", "start"]
+COPY --from=build /app/build /usr/share/nginx/html
+
+# Copy custom Nginx configuration if needed
+# COPY nginx.conf /etc/nginx/nginx.conf
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
